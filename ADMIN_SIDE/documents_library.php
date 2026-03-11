@@ -1,7 +1,35 @@
 <?php
 // documents_library.php — DOCUMENTS LIBRARY
 require_once 'admin_shared.php';
+require_once '../helpers/ActionRequest.php';
+$ar = new ActionRequest($conn);
 
+// Is the current user a super_admin? They bypass approval.
+$isSuperAdmin = ($_SESSION['role'] === 'super_admin');
+
+// ── ID NOTIFICATIONS for dashboard ────────────────────────
+$id_notifs = [];
+$conn->query("CREATE TABLE IF NOT EXISTS admin_notifications (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    personnel_id INT NOT NULL,
+    type ENUM('id_updated','expiring_soon','expired') NOT NULL,
+    id_kind ENUM('prc','other') NOT NULL,
+    message TEXT NOT NULL,
+    is_read TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+)");
+$notif_result = $conn->query(
+    "SELECT n.*, p.full_name, p.subject
+     FROM admin_notifications n
+     JOIN personnels p ON p.id = n.personnel_id
+     WHERE n.type IN ('expired','expiring_soon')
+     ORDER BY n.type ASC, n.created_at DESC
+     LIMIT 20"
+);
+if ($notif_result) {
+    while ($row = $notif_result->fetch_assoc()) $id_notifs[] = $row;
+}
+$notif_unread = count(array_filter($id_notifs, fn($n) => !$n['is_read']));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -26,15 +54,17 @@ require_once 'admin_shared.php';
   --danger:  #c8102e;
   --warn:    #d97706;
   --purple:  #7b1fa2;
+  --red:     #c8102e;
+  --red-dark:#9b0c22;
   --sidebar: 260px;
 }
 body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; }
 
 /* ── SIDEBAR ─────────────────────────────────────────── */
-.sidebar { width: var(--sidebar); background: var(--accent2); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; box-shadow: 4px 0 20px rgba(155,12,34,0.15); }
+.sidebar { width: var(--sidebar);background: linear-gradient(135deg, var(--red), var(--red-dark));  display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; box-shadow: 4px 0 20px rgba(155,12,34,0.15); }
 .sidebar-logo { padding: 24px 20px 20px; border-bottom: 1px solid rgba(255,255,255,0.12); display: flex; flex-direction: column; align-items: center; gap: 12px; background: transparent; }
 .sidebar-logo-img-wrap { width: 76px; height: 76px; border-radius: 50%; background: #fff; padding: 6px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 18px rgba(0,0,0,0.3), 0 0 0 3px rgba(255,255,255,0.18); flex-shrink: 0; }
-.sidebar-logo img { width: 100%; height: 100%; object-fit: contain  ; display: block; }
+.sidebar-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .sidebar-logo-text { text-align: center; }
 .sidebar-logo-text h2 { color: #fff; font-size: 12.5px; font-weight: 700; font-family: 'DM Serif Display', serif; line-height: 1.45; letter-spacing: 0.01em; }
 .sidebar-logo-text span { color: rgba(255,255,255,0.45); font-size: 9px; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: 1.8px; display: block; margin-top: 4px; }
@@ -67,6 +97,8 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
 .btn-view:hover { background: rgba(200,16,46,0.2); }
 .btn-purple { background: rgba(167,139,250,0.12); color: var(--purple); border: 1px solid rgba(167,139,250,0.3); }
 .btn-purple:hover { background: rgba(167,139,250,0.2); }
+/* Approval-pending state */
+.btn-pending { background: rgba(217,119,6,0.12); color: var(--warn); border: 1px solid rgba(217,119,6,0.3); cursor: not-allowed; }
 
 .folder-topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
 .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
@@ -149,6 +181,128 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
 .folder-search-input { width: 100%; padding: 10px 16px 10px 40px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 13px; outline: none; transition: border-color 0.2s; }
 .folder-search-input::placeholder { color: var(--muted); }
 .folder-search-input:focus { border-color: var(--accent); }
+
+/* ── APPROVAL NOTICE BANNER ──────────────────────────── */
+.approval-notice {
+  display: flex; align-items: center; gap: 12px;
+  background: #fff7ed; border: 1.5px solid #fddcb0;
+  border-radius: 12px; padding: 14px 18px; margin-bottom: 20px;
+  font-size: 13px; color: #92400e;
+}
+.approval-notice .an-icon { font-size: 20px; flex-shrink: 0; }
+.approval-notice strong { display: block; font-weight: 600; margin-bottom: 2px; }
+.approval-notice span { font-size: 12px; opacity: 0.8; }
+
+/* ── CUSTOM DOWNLOAD APPROVAL MODAL ──────────────────── */
+.dl-modal-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(10,2,4,0.55);
+  backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.dl-modal-overlay.open {
+  opacity: 1; pointer-events: all;
+}
+.dl-modal {
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 32px 80px rgba(155,12,34,0.22), 0 0 0 1px rgba(200,16,46,0.08);
+  padding: 0;
+  width: min(440px, 92vw);
+  transform: translateY(18px) scale(0.97);
+  transition: transform 0.28s cubic-bezier(.34,1.56,.64,1);
+  overflow: hidden;
+}
+.dl-modal-overlay.open .dl-modal {
+  transform: translateY(0) scale(1);
+}
+.dl-modal-top {
+  background: linear-gradient(135deg, #c8102e 0%, #9b0c22 100%);
+  padding: 28px 28px 22px;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  position: relative;
+}
+.dl-modal-top::after {
+  content: '';
+  position: absolute; bottom: -1px; left: 0; right: 0; height: 20px;
+  background: #fff;
+  border-radius: 20px 20px 0 0;
+}
+.dl-modal-lock-ring {
+  width: 64px; height: 64px;
+  background: rgba(255,255,255,0.15);
+  border: 2px solid rgba(255,255,255,0.3);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px;
+  animation: dl-pulse 2.2s ease-in-out infinite;
+}
+@keyframes dl-pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.25); }
+  50%      { box-shadow: 0 0 0 10px rgba(255,255,255,0); }
+}
+.dl-modal-top-title {
+  color: #fff; font-size: 16px; font-weight: 700;
+  font-family: 'DM Serif Display', serif;
+  letter-spacing: 0.01em; position: relative; z-index: 1;
+}
+.dl-modal-body { padding: 22px 28px 24px; }
+.dl-modal-label {
+  font-size: 11px; font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase; letter-spacing: 1.5px;
+  color: var(--muted); margin-bottom: 6px;
+}
+.dl-modal-filename {
+  background: #fdf0f2;
+  border: 1px solid rgba(200,16,46,0.15);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 13px; font-weight: 600;
+  color: var(--text);
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 16px;
+}
+.dl-modal-filename .dmf-icon { font-size: 20px; flex-shrink: 0; }
+.dl-modal-info {
+  background: #fff7ed;
+  border: 1px solid #fddcb0;
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 12px; color: #92400e;
+  display: flex; align-items: flex-start; gap: 8px;
+  margin-bottom: 22px;
+  line-height: 1.5;
+}
+.dl-modal-info .dmi-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+.dl-modal-actions {
+  display: flex; gap: 10px;
+}
+.dl-modal-cancel {
+  flex: 1; padding: 12px;
+  border-radius: 11px;
+  border: 1.5px solid var(--border);
+  background: none;
+  font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600;
+  color: var(--muted); cursor: pointer;
+  transition: all 0.18s;
+}
+.dl-modal-cancel:hover { border-color: #bbb; color: var(--text); }
+.dl-modal-confirm {
+  flex: 2; padding: 12px;
+  border-radius: 11px; border: none;
+  background: linear-gradient(135deg, #c8102e, #9b0c22);
+  color: #fff;
+  font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(200,16,46,0.35);
+  transition: all 0.18s;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.dl-modal-confirm:hover { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(200,16,46,0.45); }
+.dl-modal-confirm:active { transform: translateY(0); }
+
 </style>
 </head>
 <body>
@@ -161,7 +315,7 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
     </div>
     <div class="sidebar-logo-text">
       <h2>Trece Martires City<br>National High School</h2>
-      <span>Administrator Portal</span>
+      <span><?= $isSuperAdmin ? 'Super Admin Portal' : 'Administrator Portal' ?></span>
     </div>
   </div>
   <nav class="nav">
@@ -170,15 +324,36 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
     <a class="nav-item" href="manage_personnel.php"><span class="ni">👩‍🏫</span> Manage Personnel</a>
     <a class="nav-item" href="org_management.php"><span class="ni">🏛️</span> Org Management</a>
     <a class="nav-item active" href="documents_library.php"><span class="ni">📁</span> Documents</a>
+    <div class="nav-label" style="margin-top:8px">Requests & Alerts</div>
+    <a class="nav-item" href="admin_my_requests.php">
+      <span class="ni">📋</span> My Requests
+      <?php
+        // Unread request notifications badge
+        $reqNotifRes = $conn->query("SELECT COUNT(*) AS c FROM admin_request_notifications WHERE admin_user_id = {$_SESSION['user_id']} AND is_read = 0");
+        $reqNotifCount = $reqNotifRes ? (int)$reqNotifRes->fetch_assoc()['c'] : 0;
+        if ($reqNotifCount > 0): ?>
+        <span class="nav-badge"><?= $reqNotifCount ?></span>
+      <?php endif; ?>
+    </a>
+    <a class="nav-item" href="admin_notifications.php">
+      <span class="ni">🔔</span> ID Notifications
+      <?php if ($notif_unread > 0): ?>
+        <span style="background:rgba(255,255,255,0.25);color:#fff;border-radius:999px;padding:1px 8px;font-size:10px;font-weight:700;margin-left:auto"><?= $notif_unread ?></span>
+      <?php endif; ?>
+    </a>
+    <?php if ($isSuperAdmin): ?>
+    <div class="nav-label" style="margin-top:8px">Super Admin</div>
+    <a class="nav-item" href="../SUPER_ADMIN/superadmin_dashboard.php"><span class="ni">🛡️</span> Control Panel</a>
+    <?php endif; ?>
   </nav>
   <div class="sidebar-footer">
     <div class="user-chip">
-      <div class="avatar">🛡️</div>
+      <div class="avatar"><?= $isSuperAdmin ? '👑' : '🛡️' ?></div>
       <div class="user-info">
         <strong><?= htmlspecialchars($_SESSION['username']) ?></strong>
-        <small>Administrator</small>
+        <small><?= $isSuperAdmin ? 'Super Admin' : 'Administrator' ?></small>
       </div>
-      <a href="../logout.php" class="logout-btn" title="Logout" style="font-size: 1.5rem;">⏏</a>
+      <a href="../logout.php" class="logout-btn" title="Logout" style="font-size:1.5rem">⏏</a>
     </div>
   </div>
 </aside>
@@ -192,6 +367,17 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
   </div>
 
   <div class="page">
+
+    <?php if (!$isSuperAdmin): ?>
+    <!-- Notice shown only to regular admins -->
+    <div class="approval-notice">
+      <span class="an-icon">🔒</span>
+      <div>
+        <strong>Download Approval Required</strong>
+        <span>Downloading files requires Super Admin approval. After clicking Download, you will be redirected to a waiting page until the Super Admin approves your request.</span>
+      </div>
+    </div>
+    <?php endif; ?>
 
     <div id="folderGrid">
       <div class="folder-topbar">
@@ -301,6 +487,33 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
     </div>
 
   </div>
+
+  <!-- CUSTOM DOWNLOAD APPROVAL MODAL -->
+<div class="dl-modal-overlay" id="dlModalOverlay">
+  <div class="dl-modal">
+    <div class="dl-modal-top">
+      <div class="dl-modal-lock-ring">🔒</div>
+      <div class="dl-modal-top-title">Download Approval Required</div>
+    </div>
+    <div class="dl-modal-body">
+      <div class="dl-modal-label">Requesting file</div>
+      <div class="dl-modal-filename">
+        <span class="dmf-icon" id="dlModalIcon">📄</span>
+        <span id="dlModalTitle">File Name</span>
+      </div>
+      <div class="dl-modal-info">
+        <span class="dmi-icon">⏳</span>
+        <span>Your request will be sent to the Super Admin for approval. You'll be redirected to a waiting page until it's approved.</span>
+      </div>
+      <div class="dl-modal-actions">
+        <button class="dl-modal-cancel" onclick="closeDlModal()">Cancel</button>
+        <button class="dl-modal-confirm" id="dlModalConfirmBtn">
+          <span>🚀</span> Send Request
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 </main>
 
 <script>
@@ -309,6 +522,9 @@ const leaveByTeacher   = <?= $leave_by_teacher_json ?>;
 const leaveTotalAbsent = <?= $leave_total_json ?>;
 const teachersArr      = <?= json_encode($teachers_arr) ?>;
 const TOTAL_LEAVE_DAYS = <?= $total_leave_days ?>;
+
+// Is the current user a super_admin? Passed from PHP.
+const IS_SUPER_ADMIN   = <?= $isSuperAdmin ? 'true' : 'false' ?>;
 
 const avatarGrads = [
   'background:linear-gradient(135deg,#c8102e,#9b0c22)',
@@ -330,6 +546,61 @@ function fmtDateChip(s) { const d=new Date(s+'T00:00:00'); return MONTHS[d.getMo
 let currentFolderTab = 'docs';
 let currentInnerTab  = 'docs';
 let currentTeacherId = null;
+
+// ── DOWNLOAD REQUEST FUNCTION ─────────────────────────
+// ── CUSTOM MODAL LOGIC ────────────────────────────────
+let _dlModalCallback = null;
+
+function showDlModal(title, icon, onConfirm) {
+  document.getElementById('dlModalTitle').textContent = title;
+  document.getElementById('dlModalIcon').textContent  = icon;
+  document.getElementById('dlModalConfirmBtn').onclick = () => {
+    closeDlModal();
+    onConfirm();
+  };
+  document.getElementById('dlModalOverlay').classList.add('open');
+}
+
+function closeDlModal() {
+  document.getElementById('dlModalOverlay').classList.remove('open');
+}
+
+// Close on backdrop click
+document.getElementById('dlModalOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeDlModal();
+});
+
+function requestDownload(docId, docTitle, directPath, fileName) {
+  if (IS_SUPER_ADMIN) {
+    const a = document.createElement('a');
+    a.href = directPath; a.download = fileName; a.click();
+    return;
+  }
+  const icon = getIcon(fileName);
+  showDlModal(docTitle, icon, () => {
+    const form = document.createElement('form');
+    form.method = 'GET'; form.action = 'download_file.php';
+    const inp = document.createElement('input');
+    inp.type = 'hidden'; inp.name = 'doc_id'; inp.value = docId;
+    form.appendChild(inp);
+    document.body.appendChild(form);
+    form.submit();
+  });
+}
+
+function requestScanDownload(filePath, fileName) {
+  showDlModal(fileName, '📎', () => {
+    const form = document.createElement('form');
+    form.method = 'GET'; form.action = 'download_scan.php';
+    const p = document.createElement('input');
+    p.type = 'hidden'; p.name = 'file_path'; p.value = filePath;
+    const n = document.createElement('input');
+    n.type = 'hidden'; n.name = 'file_name'; n.value = fileName;
+    form.appendChild(p); form.appendChild(n);
+    document.body.appendChild(form);
+    form.submit();
+  });
+}
 
 // Auto-switch tab from URL ?tab= param
 (function() {
@@ -388,16 +659,30 @@ function switchInnerTab(tab) {
 
 function renderDocsInFolder(docs) {
   const list = document.getElementById('fvFileList');
-  if (docs.length===0) { list.innerHTML=`<div class="empty-folder"><span class="ef-icon">📭</span><p>No documents uploaded yet.</p></div>`; return; }
-  list.innerHTML = docs.map(d=>{
-    const icon=getIcon(d.file_name);
-    const ext=getExt(d.file_name).toUpperCase();
+  if (docs.length===0) {
+    list.innerHTML=`<div class="empty-folder"><span class="ef-icon">📭</span><p>No documents uploaded yet.</p></div>`;
+    return;
+  }
+  list.innerHTML = docs.map(d => {
+    const icon    = getIcon(d.file_name);
+    const ext     = getExt(d.file_name).toUpperCase();
+    const safeTtl = (d.title||'').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    const safeFnm = (d.file_name||'').replace(/'/g,"\\'");
+
+    // Download button differs by role
+    const dlBtn = IS_SUPER_ADMIN
+      ? `<button class="btn btn-download btn-sm" onclick="requestDownload(${d.id},'${safeTtl}','${d.file_path}','${safeFnm}')">⬇ Download</button>`
+      : `<button class="btn btn-download btn-sm" onclick="requestDownload(${d.id},'${safeTtl}','${d.file_path}','${safeFnm}')">🔒 Request Download</button>`;
+
     return `<div class="file-row" data-title="${(d.title||'').toLowerCase()}" data-fname="${d.file_name.toLowerCase()}">
       <span class="file-row-icon">${icon}</span>
-      <div class="file-row-info"><strong>${d.title}</strong><span>${d.file_name} · <span style="color:var(--accent)">${ext}</span> · ${fmtSize(d.file_size)} · ${fmtDate(d.uploaded_at)}</span></div>
+      <div class="file-row-info">
+        <strong>${d.title}</strong>
+        <span>${d.file_name} · <span style="color:var(--accent)">${ext}</span> · ${fmtSize(d.file_size)} · ${fmtDate(d.uploaded_at)}</span>
+      </div>
       <div class="file-row-actions">
         <a class="btn btn-view btn-sm" href="${d.file_path}" target="_blank">👁 View</a>
-        <a class="btn btn-download btn-sm" href="${d.file_path}" download="${d.file_name}">⬇ Download</a>
+        ${dlBtn}
       </div>
     </div>`;
   }).join('');
@@ -405,14 +690,26 @@ function renderDocsInFolder(docs) {
 
 function renderLeaveInFolder(records) {
   const list = document.getElementById('fvFileList');
-  if (records.length===0) { list.innerHTML=`<div class="empty-folder"><span class="ef-icon">📋</span><p>No leave records filed yet.</p></div>`; return; }
-  list.innerHTML = records.map(r=>{
-    const dates=r.absent_dates?r.absent_dates.split(',').filter(Boolean):[];
-    const ltClass=leaveTypeClass[r.leave_type]||'leave-other';
-    const chips=dates.map(d=>`<span class="date-chip">${fmtDateChip(d.trim())}</span>`).join('');
-    const scanBtn=r.scan_file_path
-      ?`<a class="btn btn-purple btn-sm" href="${r.scan_file_path}" target="_blank">📎 View Scan</a><a class="btn btn-download btn-sm" href="${r.scan_file_path}" download>⬇ Download</a>`
-      :`<span style="color:var(--muted);font-size:11px;font-family:'JetBrains Mono',monospace">No scan attached</span>`;
+  if (records.length===0) {
+    list.innerHTML=`<div class="empty-folder"><span class="ef-icon">📋</span><p>No leave records filed yet.</p></div>`;
+    return;
+  }
+  list.innerHTML = records.map(r => {
+    const dates   = r.absent_dates ? r.absent_dates.split(',').filter(Boolean) : [];
+    const ltClass = leaveTypeClass[r.leave_type] || 'leave-other';
+    const chips   = dates.map(d=>`<span class="date-chip">${fmtDateChip(d.trim())}</span>`).join('');
+    const safePath = (r.scan_file_path||'').replace(/'/g,"\\'");
+    const safeName = (r.scan_file_name||'leave_scan').replace(/'/g,"\\'");
+
+    // Scan download also goes through approval for regular admins
+    const scanBtn = r.scan_file_path
+      ? IS_SUPER_ADMIN
+        ? `<a class="btn btn-purple btn-sm" href="${r.scan_file_path}" target="_blank">📎 View Scan</a>
+           <a class="btn btn-download btn-sm" href="${r.scan_file_path}" download>⬇ Download</a>`
+        : `<a class="btn btn-purple btn-sm" href="${r.scan_file_path}" target="_blank">📎 View Scan</a>
+           <button class="btn btn-download btn-sm" onclick="requestScanDownload('${safePath}','${safeName}')">🔒 Request Download</button>`
+      : `<span style="color:var(--muted);font-size:11px;font-family:'JetBrains Mono',monospace">No scan attached</span>`;
+
     return `<div class="leave-file-row" data-title="${r.leave_type.toLowerCase()}" data-fname="${(r.reason||'').toLowerCase()}">
       <span class="file-row-icon">📋</span>
       <div class="file-row-info" style="flex:1;min-width:0">
@@ -429,6 +726,7 @@ function renderLeaveInFolder(records) {
   }).join('');
 }
 
+
 function closeFolder() {
   document.getElementById('folderGrid').style.display = '';
   document.getElementById('folderContents').classList.remove('active');
@@ -439,7 +737,7 @@ function filterFolders(query) {
   const q = query.trim().toLowerCase();
   const activeGrid = currentFolderTab==='docs' ? '#docsFolderGrid' : '#leaveFolderGrid';
   let visible = 0;
-  document.querySelectorAll(activeGrid+' .folder-card').forEach(card=>{
+  document.querySelectorAll(activeGrid+' .folder-card').forEach(card => {
     const show = !q || (card.getAttribute('data-folder-name')||'').includes(q);
     card.style.display = show ? '' : 'none';
     if (show) visible++;
@@ -450,9 +748,9 @@ function filterFolders(query) {
 function filterInnerFiles(query) {
   const q = query.trim().toLowerCase();
   const selector = currentInnerTab==='docs' ? '.file-row' : '.leave-file-row';
-  document.querySelectorAll('#fvFileList '+selector).forEach(row=>{
-    const t=(row.getAttribute('data-title')||'')+(row.getAttribute('data-fname')||'');
-    row.style.display=(!q||t.includes(q))?'':'none';
+  document.querySelectorAll('#fvFileList '+selector).forEach(row => {
+    const t = (row.getAttribute('data-title')||'')+(row.getAttribute('data-fname')||'');
+    row.style.display = (!q || t.includes(q)) ? '' : 'none';
   });
 }
 </script>

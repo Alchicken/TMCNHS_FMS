@@ -2,12 +2,12 @@
 // admin_shared.php — Common bootstrap for all admin pages
 require_once '../Config.php';
 
-if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+// Allow both admin AND super_admin to access admin pages
+if (!isset($_SESSION['role']) || !in_array($_SESSION['role'], ['admin', 'super_admin'])) {
     header('Location: ../login.php'); exit;
 }
 
 // ── Detect base path automatically (works for any subfolder name) ─────────────
-// e.g. if project is at C:/xampp/htdocs/TMCNHS-SYSTEM/, base = /TMCNHS-SYSTEM
 $_BASE = rtrim(str_replace(
     str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT']),
     '',
@@ -18,12 +18,10 @@ function asset_url($path) {
     global $_BASE;
     if (empty($path)) return '';
     $path = str_replace('\\', '/', $path);
-    // Remove any accidental absolute server path prefix
     $root = str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT']);
     if (strpos($path, $root) === 0) {
         $path = substr($path, strlen($root));
     }
-    // Strip leading slashes so we can re-add cleanly
     $path = ltrim($path, '/');
     return $_BASE . '/' . $path;
 }

@@ -134,6 +134,32 @@ $active_tab     = ($_GET['tab'] ?? '') === 'positions' ? 'positions' : 'departme
 // Stats
 $active_depts = count(array_filter($departments, fn($d) => $d['status'] === 'active'));
 $active_pos   = count(array_filter($positions,   fn($p) => $p['status'] === 'active'));
+
+// ── ID NOTIFICATIONS for dashboard ────────────────────────
+$id_notifs = [];
+$conn->query("CREATE TABLE IF NOT EXISTS admin_notifications (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    personnel_id INT NOT NULL,
+    type ENUM('id_updated','expiring_soon','expired') NOT NULL,
+    id_kind ENUM('prc','other') NOT NULL,
+    message TEXT NOT NULL,
+    is_read TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+)");
+$notif_result = $conn->query(
+    "SELECT n.*, p.full_name, p.subject
+     FROM admin_notifications n
+     JOIN personnels p ON p.id = n.personnel_id
+     WHERE n.type IN ('expired','expiring_soon')
+     ORDER BY n.type ASC, n.created_at DESC
+     LIMIT 20"
+);
+if ($notif_result) {
+    while ($row = $notif_result->fetch_assoc()) $id_notifs[] = $row;
+}
+$notif_unread = count(array_filter($id_notifs, fn($n) => !$n['is_read']));
+
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -151,12 +177,12 @@ $active_pos   = count(array_filter($positions,   fn($p) => $p['status'] === 'act
   --bg:#f7f2f2;--surface:#ffffff;--card:#ffffff;--border:#f0d4d4;
   --accent:#c8102e;--accent2:#9b0c22;--text:#1a0608;--muted:#9c7b7e;
   --success:#059669;--danger:#c8102e;--warn:#d97706;--purple:#7b1fa2;
-  --sidebar:260px;
+  --sidebar:260px;--red: #c8102e; --red-dark:  #9b0c22;
 }
 body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex}
 
  /* ── SIDEBAR ─────────────────────────────────────────── */
-  .sidebar { width: var(--sidebar); background: var(--accent2); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; box-shadow: 4px 0 20px rgba(155,12,34,0.15); }
+  .sidebar { width: var(--sidebar); background: linear-gradient(135deg, var(--red), var(--red-dark));  display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; box-shadow: 4px 0 20px rgba(155,12,34,0.15); }
   .sidebar-logo { padding: 24px 20px 20px; border-bottom: 1px solid rgba(255,255,255,0.12); display: flex; flex-direction: column; align-items: center; gap: 12px; background: transparent; }
   .sidebar-logo-img-wrap { width: 76px; height: 76px; border-radius: 50%; background: #fff; padding: 6px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 18px rgba(0,0,0,0.3), 0 0 0 3px rgba(255,255,255,0.18); flex-shrink: 0; }
   .sidebar-logo img { width: 100%; height: 100%; object-fit: contain  ; display: block; }
@@ -309,9 +335,26 @@ tr:hover td:first-child{border-left:3px solid var(--accent);padding-left:17px}
     <div class="nav-label">Main</div>
     <a class="nav-item" href="admin_dashboard.php"><span class="ni">📊</span> Dashboard</a>
     <a class="nav-item" href="manage_personnel.php"><span class="ni">👩‍🏫</span> Manage Personnel</a>
-    <a class="nav-item active" href="org_management.php"><span class="ni">🏛️</span> Org Management</a>
+    <a class="nav-item" href="org_management.php"><span class="ni">🏛️</span> Org Management</a>
     <a class="nav-item" href="documents_library.php"><span class="ni">📁</span> Documents</a>
-  </nav>
+    <div class="nav-label" style="margin-top:8px">Requests & Alerts</div>
+    <a class="nav-item" href="admin_my_requests.php">
+      <span class="ni">📋</span> My Requests
+      <?php
+        // Unread request notifications badge
+        $reqNotifRes = $conn->query("SELECT COUNT(*) AS c FROM admin_request_notifications WHERE admin_user_id = {$_SESSION['user_id']} AND is_read = 0");
+        $reqNotifCount = $reqNotifRes ? (int)$reqNotifRes->fetch_assoc()['c'] : 0;
+        if ($reqNotifCount > 0): ?>
+        <span class="nav-badge"><?= $reqNotifCount ?></span>
+      <?php endif; ?>
+    </a>
+      <a class="nav-item" href="admin_notifications.php">
+          <span class="ni">🔔</span> ID Notifications
+          <?php if ($notif_unread > 0): ?>
+              <span class="nav-badge <?= $notif_unread>0?'pulse':'' ?>"><?= $notif_unread ?></span>
+          <?php endif; ?>
+      </a>
+    </nav>
   <div class="sidebar-footer">
     <div class="user-chip">
       <div class="avatar">🛡️</div>

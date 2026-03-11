@@ -3,9 +3,10 @@ require_once 'Config.php';
 
 $error = '';
 
-// Redirect if already logged in
 if (isset($_SESSION['role'])) {
-    if ($_SESSION['role'] === 'admin') {
+    if ($_SESSION['role'] === 'super_admin') {
+        header('Location: SUPER_ADMIN/superadmin_dashboard.php'); exit;
+    } elseif ($_SESSION['role'] === 'admin') {
         header('Location: ADMIN_SIDE/admin_dashboard.php'); exit;
     } elseif ($_SESSION['role'] === 'teacher') {
         header('Location: PERSONNELSIDE/teacher_dashboard.php'); exit;
@@ -29,7 +30,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['username'] = $user['username'];
             $_SESSION['role']     = $user['role'];
 
-            if ($user['role'] === 'admin') {
+            if ($user['role'] === 'super_admin') {
+                header('Location: SUPER_ADMIN/superadmin_dashboard.php');
+            } elseif ($user['role'] === 'admin') {
                 header('Location: ADMIN_SIDE/admin_dashboard.php');
             } else {
                 header('Location: PERSONNELSIDE/teacher_dashboard.php');
@@ -602,7 +605,7 @@ html, body {
       <div class="portal-badge">Management Portal</div>
     </div>
 
-    <div class="left-footer">SchoolSync © 2025 — TMCNHS</div>
+    <div class="left-footer">© 2025 — TMCNHS</div>
   </div>
 
   <!-- ── RIGHT PANEL ────────────────────── -->
@@ -621,19 +624,29 @@ html, body {
       <?php endif; ?>
 
       <div class="role-section-label">Sign in as</div>
-      <div class="role-toggle">
-        <button type="button" class="role-btn <?= (empty($_POST['role']) || ($_POST['role'] ?? '') === 'admin') ? 'active' : '' ?>"
+      <div class="role-toggle" style="grid-template-columns: 1fr 1fr 1fr;">
+
+        <button type="button" class="role-btn"
+                id="roleSuperAdmin" onclick="setRole('super_admin')"  style="display:none">
+          <span class="rb-icon">👑</span>
+          <span class="rb-label">Super Admin</span>
+          <span class="rb-sub">Master access</span>
+        </button>
+
+        <button type="button" class="role-btn active"
                 id="roleAdmin" onclick="setRole('admin')">
           <span class="rb-icon">🛡️</span>
           <span class="rb-label">Administrator</span>
           <span class="rb-sub">Full access</span>
         </button>
-        <button type="button" class="role-btn <?= (($_POST['role'] ?? '') === 'teacher') ? 'active' : '' ?>"
+
+        <button type="button" class="role-btn"
                 id="roleTeacher" onclick="setRole('teacher')">
           <span class="rb-icon">👩‍🏫</span>
           <span class="rb-label">Personnel</span>
           <span class="rb-sub">Staff access</span>
         </button>
+
       </div>
 
       <form method="POST" id="loginForm" autocomplete="on">
@@ -666,8 +679,7 @@ html, body {
         </button>
       </form>
 
-      <div class="form-footer">
-        Powered by <strong>SchoolSync</strong> · TMCNHS © 2025
+      <div class="form-footer"><strong></strong> · TMCNHS © 2025
       </div>
 
     </div>
@@ -679,14 +691,23 @@ html, body {
 </div>
 
 <script>
+
+  // Press Ctrl+Shift+S to reveal the Super Admin button
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.shiftKey && e.key === 'Q') {
+    document.getElementById('roleSuperAdmin').style.display = 'block';
+  }
+});
+
 function setRole(role) {
   document.getElementById('roleInput').value = role;
+  document.getElementById('roleSuperAdmin').classList.toggle('active', role === 'super_admin');
   document.getElementById('roleAdmin').classList.toggle('active', role === 'admin');
   document.getElementById('roleTeacher').classList.toggle('active', role === 'teacher');
 }
 
 function togglePw() {
-  const pw = document.getElementById('password');
+  const pw  = document.getElementById('password');
   const btn = document.getElementById('pwToggle');
   if (pw.type === 'password') {
     pw.type = 'text';
@@ -697,10 +718,14 @@ function togglePw() {
   }
 }
 
-// Keyboard shortcut: Alt+A / Alt+P for role switch
+// Keyboard shortcuts
 document.addEventListener('keydown', e => {
   if (e.altKey && e.key === 'a') setRole('admin');
   if (e.altKey && e.key === 'p') setRole('teacher');
+  if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+    const btn = document.getElementById('roleSuperAdmin');
+    btn.style.display = btn.style.display === 'none' ? 'block' : 'none';
+  }
 });
 </script>
 </body>

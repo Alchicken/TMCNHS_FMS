@@ -380,7 +380,7 @@ $recent_docs = array_slice($doc_rows, 0, 5);
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Document</th><th>Type</th><th>Size</th><th>Uploaded</th><th>Action</th></tr></thead>
+        <thead><tr><th>Document</th><th>Type</th><th>Size</th><th>Uploaded</th><th>Actions</th></tr></thead>
         <tbody>
         <?php if (empty($recent_docs)): ?>
           <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:48px">
@@ -399,7 +399,10 @@ $recent_docs = array_slice($doc_rows, 0, 5);
             <td><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--accent)"><?= $ext ?></span></td>
             <td style="color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px"><?= $size ?></td>
             <td style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--muted)"><?= date('M d, Y', strtotime($d['uploaded_at'])) ?></td>
-            <td><a class="btn btn-ghost btn-sm" href="<?= htmlspecialchars($d['file_path']) ?>" download>⬇ Download</a></td>
+            <td style="display:flex;gap:6px;align-items:center">
+              <a class="btn btn-ghost btn-sm" href="../<?= htmlspecialchars($d['file_path']) ?>" target="_blank">👁 View</a>
+              <a class="btn btn-ghost btn-sm" href="../<?= htmlspecialchars($d['file_path']) ?>" download="<?= htmlspecialchars($d['file_name']) ?>">⬇ Download</a>
+            </td>
           </tr>
         <?php endforeach; endif; ?>
         </tbody>

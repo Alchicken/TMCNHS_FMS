@@ -4,6 +4,30 @@ require_once 'admin_shared.php';
 
 $msg = $err = '';
 
+// ── ID NOTIFICATIONS for dashboard ────────────────────────
+$id_notifs = [];
+$conn->query("CREATE TABLE IF NOT EXISTS admin_notifications (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    personnel_id INT NOT NULL,
+    type ENUM('id_updated','expiring_soon','expired') NOT NULL,
+    id_kind ENUM('prc','other') NOT NULL,
+    message TEXT NOT NULL,
+    is_read TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+)");
+$notif_result = $conn->query(
+    "SELECT n.*, p.full_name, p.subject
+     FROM admin_notifications n
+     JOIN personnels p ON p.id = n.personnel_id
+     WHERE n.type IN ('expired','expiring_soon')
+     ORDER BY n.type ASC, n.created_at DESC
+     LIMIT 20"
+);
+if ($notif_result) {
+    while ($row = $notif_result->fetch_assoc()) $id_notifs[] = $row;
+}
+$notif_unread = count(array_filter($id_notifs, fn($n) => !$n['is_read']));
+
 function human_time_diff(int $timestamp): string {
     $diff = time() - $timestamp;
     if ($diff < 60)      return 'just now';
@@ -37,12 +61,58 @@ function human_time_diff(int $timestamp): string {
   --danger:  #c8102e;
   --warn:    #d97706;
   --purple:  #7b1fa2;
+  --red:       #c8102e;
+  --red-dark:  #9b0c22;
   --sidebar: 260px;
 }
+/* ── ID NOTIFICATION PANEL ── */
+.id-notif-panel {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 14px; overflow: hidden; margin-bottom: 22px;
+}
+.id-notif-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, #fff7ed, #fff1f2);
+}
+.id-notif-header h3 { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.id-notif-badge {
+  background: var(--danger); color: #fff; border-radius: 20px;
+  font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono', monospace;
+  padding: 2px 9px; animation: notifPulse 2s ease-in-out infinite;
+}
+@keyframes notifPulse { 0%,100%{box-shadow:0 0 0 0 rgba(200,16,46,0.4)} 50%{box-shadow:0 0 0 6px rgba(200,16,46,0)} }
+.id-notif-empty { padding: 32px; text-align: center; color: var(--muted); font-size: 13px; }
+.id-notif-empty span { font-size: 28px; display: block; margin-bottom: 8px; }
+.id-notif-list { max-height: 320px; overflow-y: auto; }
+.id-notif-item {
+  display: flex; align-items: center; gap: 14px;
+  padding: 13px 20px; border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+.id-notif-item:last-child { border-bottom: none; }
+.id-notif-item:hover { background: rgba(200,16,46,0.03); }
+.id-notif-item.expired-item  { border-left: 3px solid var(--danger); }
+.id-notif-item.expiring-item { border-left: 3px solid var(--warn); }
+.id-notif-dot {
+  width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 16px;
+}
+.id-notif-dot.expired  { background: rgba(200,16,46,0.12); }
+.id-notif-dot.expiring { background: rgba(217,119,6,0.12); }
+.id-notif-body { flex: 1; min-width: 0; }
+.id-notif-body strong { display: block; font-size: 13px; font-weight: 600; }
+.id-notif-body span { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+.id-notif-pill {
+  padding: 3px 10px; border-radius: 20px; font-size: 10px;
+  font-weight: 700; font-family: 'JetBrains Mono', monospace; flex-shrink: 0;
+}
+.id-notif-pill.expired  { background: rgba(200,16,46,0.12); color: var(--danger); }
+.id-notif-pill.expiring { background: rgba(217,119,6,0.12); color: var(--warn); }
 body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; }
 
 /* ── SIDEBAR ─────────────────────────────────────────── */
-.sidebar { width: var(--sidebar); background: var(--accent2); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; box-shadow: 4px 0 20px rgba(155,12,34,0.15); }
+.sidebar { width: var(--sidebar); background: linear-gradient(135deg, var(--red), var(--red-dark)); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; box-shadow: 4px 0 20px rgba(155,12,34,0.15); }
 .sidebar-logo { padding: 24px 20px 20px; border-bottom: 1px solid rgba(255,255,255,0.12); display: flex; flex-direction: column; align-items: center; gap: 12px; background: transparent; }
 .sidebar-logo-img-wrap { width: 76px; height: 76px; border-radius: 50%; background: #fff; padding: 6px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 18px rgba(0,0,0,0.3), 0 0 0 3px rgba(255,255,255,0.18); flex-shrink: 0; }
 .sidebar-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
@@ -550,6 +620,23 @@ tr:hover td { background: rgba(200,16,46,0.03); }
     <a class="nav-item" href="manage_personnel.php"><span class="ni">👩‍🏫</span> Manage Personnel</a>
     <a class="nav-item" href="org_management.php"><span class="ni">🏛️</span> Org Management</a>
     <a class="nav-item" href="documents_library.php"><span class="ni">📁</span> Documents</a>
+    <div class="nav-label" style="margin-top:8px">Requests & Alerts</div>
+    <a class="nav-item" href="admin_my_requests.php">
+      <span class="ni">📋</span> My Requests
+      <?php
+        // Unread request notifications badge
+        $reqNotifRes = $conn->query("SELECT COUNT(*) AS c FROM admin_request_notifications WHERE admin_user_id = {$_SESSION['user_id']} AND is_read = 0");
+        $reqNotifCount = $reqNotifRes ? (int)$reqNotifRes->fetch_assoc()['c'] : 0;
+        if ($reqNotifCount > 0): ?>
+        <span class="nav-badge"><?= $reqNotifCount ?></span>
+      <?php endif; ?>
+    </a>
+    <a class="nav-item" href="admin_notifications.php">
+        <span class="ni">🔔</span> ID Notifications
+        <?php if ($notif_unread > 0): ?>
+            <span class="nav-badge <?= $notif_unread>0?'pulse':'' ?>"><?= $notif_unread ?></span>
+        <?php endif; ?>
+    </a>
   </nav>
 
   <!-- ── SIDEBAR FOOTER ── -->
@@ -570,7 +657,6 @@ tr:hover td { background: rgba(200,16,46,0.03); }
       </div>
       <a href="../logout.php" class="logout-btn" title="Logout">⏏</a>
     </div>
-
   </div>
 </aside>
 
@@ -825,18 +911,42 @@ tr:hover td { background: rgba(200,16,46,0.03); }
       <button class="pm-tab" onclick="switchPmTab('docs',this)">📄 Documents <span class="tab-badge" id="pmDocTabCount">0</span></button>
       <button class="pm-tab tab-purple" onclick="switchPmTab('credit',this)">📋 Service Credit <span class="tab-badge" id="pmCreditTabCount">0</span></button>
     </div>
+
     <div class="pm-panel active" id="pmPanelInfo">
+
+      <div style="font-size:11px;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border)">🪪 Personal Information</div>
       <div class="info-grid">
         <div class="info-item"><label>Full Name</label><span id="pmFullName"></span></div>
         <div class="info-item"><label>Username</label><span id="pmUsername" style="font-family:'JetBrains Mono',monospace"></span></div>
+        <div class="info-item"><label>Gender</label><span id="pmGender"></span></div>
+        <div class="info-item"><label>Civil Status</label><span id="pmCivilStatus"></span></div>
+        <div class="info-item"><label>Date of Birth</label><span id="pmDOB" style="font-family:'JetBrains Mono',monospace"></span></div>
+        <div class="info-item"><label>Place of Birth</label><span id="pmPOB"></span></div>
         <div class="info-item"><label>Email</label><span id="pmEmailInfo"></span></div>
         <div class="info-item"><label>Phone</label><span id="pmPhone"></span></div>
-        <div class="info-item"><label>Subject / Position</label><span id="pmSubject"></span></div>
-        <div class="info-item"><label>Department</label><span id="pmDepartment"></span></div>
-        <div class="info-item"><label>Date Hired</label><span id="pmDateHired" style="font-family:'JetBrains Mono',monospace"></span></div>
-        <div class="info-item"><label>Status</label><span id="pmStatus"></span></div>
         <div class="info-item" style="grid-column:1/-1"><label>Address</label><span id="pmAddress"></span></div>
       </div>
+
+      <div style="font-size:11px;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:20px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)">💼 Employment Details</div>
+      <div class="info-grid">
+        <div class="info-item"><label>Subject / Position</label><span id="pmSubject"></span></div>
+        <div class="info-item"><label>Department</label><span id="pmDepartment"></span></div>
+        <div class="info-item"><label>Employment Type</label><span id="pmEmploymentType"></span></div>
+        <div class="info-item"><label>Date Hired</label><span id="pmDateHired" style="font-family:'JetBrains Mono',monospace"></span></div>
+        <div class="info-item"><label>Appointment Status</label><span id="pmAppointmentStatus"></span></div>
+        <div class="info-item"><label>Status</label><span id="pmStatus"></span></div>
+      </div>
+
+      <div style="font-size:11px;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:20px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)">🏛️ Government-Issued Numbers</div>
+      <div class="info-grid">
+        <div class="info-item"><label>TIN Number</label><span id="pmTIN" style="font-family:'JetBrains Mono',monospace"></span></div>
+        <div class="info-item"><label>PhilHealth Number</label><span id="pmPhilHealth" style="font-family:'JetBrains Mono',monospace"></span></div>
+        <div class="info-item"><label>Pag-IBIG / HDMF</label><span id="pmPagIBIG" style="font-family:'JetBrains Mono',monospace"></span></div>
+        <div class="info-item"><label>SSS / GSIS Number</label><span id="pmSSS" style="font-family:'JetBrains Mono',monospace"></span></div>
+        <div class="info-item"><label>CRN Number</label><span id="pmCRN" style="font-family:'JetBrains Mono',monospace"></span></div>
+        <div class="info-item"><label>BP Number</label><span id="pmBP" style="font-family:'JetBrains Mono',monospace"></span></div>
+      </div>
+
     </div>
     <div class="pm-panel" id="pmPanelDocs">
       <div style="color:var(--muted);font-size:11px;font-family:'JetBrains Mono',monospace;margin-bottom:14px;text-transform:uppercase;letter-spacing:1px">
@@ -1036,6 +1146,19 @@ function openTeacherProfile(t) {
   document.getElementById('pmDepartment').textContent = t.department || '—';
   document.getElementById('pmDateHired').textContent  = t.date_hired || '—';
   document.getElementById('pmAddress').textContent    = t.address || '—';
+
+  document.getElementById('pmGender').textContent          = t.gender || '—';
+  document.getElementById('pmCivilStatus').textContent     = t.civil_status || '—';
+  document.getElementById('pmDOB').textContent             = t.date_of_birth || '—';
+  document.getElementById('pmPOB').textContent             = t.place_of_birth || '—';
+  document.getElementById('pmEmploymentType').textContent  = t.employment_type || '—';
+  document.getElementById('pmAppointmentStatus').textContent = t.appointment_status || '—';
+  document.getElementById('pmTIN').textContent             = t.tin_number || '—';
+  document.getElementById('pmPhilHealth').textContent      = t.philhealth_number || '—';
+  document.getElementById('pmPagIBIG').textContent         = t.pagibig_number || '—';
+  document.getElementById('pmSSS').textContent             = t.sss_number || '—';
+  document.getElementById('pmCRN').textContent             = t.crn_number || '—';
+  document.getElementById('pmBP').textContent              = t.bp_number || '—';
   document.getElementById('pmStatus').innerHTML       = `<span class="badge badge-${t.status}">${t.status.charAt(0).toUpperCase()+t.status.slice(1)}</span>`;
   const docs = docsByTeacher[t.id] || [];
   document.getElementById('pmDocTabCount').textContent = docs.length;
